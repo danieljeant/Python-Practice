@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quant Tech Equity Command Center</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root { --bg:#0a1020; --panel:#111b2e; --text:#dce8ff; --muted:#8ba2cc; --pos:#45d483; --neg:#ff7087; }
+    body { margin:0; font-family: Inter, system-ui, sans-serif; background:var(--bg); color:var(--text); padding:1rem; }
+    .grid { display:grid; gap:1rem; }
+    .kpis { grid-template-columns:repeat(4,1fr); }
+    .two { grid-template-columns:1.25fr 1fr; }
+    .card { background:var(--panel); border-radius:12px; padding:1rem; box-shadow:0 4px 18px #00000044; }
+    h1,h2,h3 { margin:.15rem 0 .5rem; }
+    .muted { color:var(--muted); }
+    .kpi p { font-size:1.5rem; margin:.2rem 0; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { border-bottom:1px solid #243b63; padding:.5rem; text-align:left; }
+    .pos { color:var(--pos); font-weight:700; }
+    .neg { color:var(--neg); font-weight:700; }
+    .row { display:flex; justify-content:space-between; align-items:center; }
+    select,button { background:#0b1630; color:var(--text); border:1px solid #35538b; border-radius:8px; padding:.4rem .6rem; }
+    .pipeline li { margin:.7rem 0; }
+    @media (max-width:1000px){ .kpis,.two { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header class="card">
+    <h1>Quant Tech Equity Command Center</h1>
+    <p class="muted">Monitor core technology names, execute client flow, and keep PnL on target.</p>
+  </header>
+
+  <section class="grid kpis" id="kpis"></section>
+
+  <section class="card">
+    <h2>Interactive Tech Basket Performance</h2>
+    <div id="performanceChart"></div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <div class="row">
+        <h2>Drawdown Risk Monitor</h2>
+        <select id="tickerSelect"></select>
+      </div>
+      <div id="drawdownChart"></div>
+    </div>
+    <div class="card">
+      <h2>Top Weekly Movers</h2>
+      <table><thead><tr><th>Ticker</th><th>Weekly Return</th></tr></thead><tbody id="movers"></tbody></table>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Position Sheet</h2>
+      <table><thead><tr><th>Ticker</th><th>Side</th><th>Qty</th><th>Entry</th><th>Current</th><th>PnL</th></tr></thead><tbody id="positions"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Client Deal Pipeline</h2>
+      <ul class="pipeline" id="pipeline"></ul>
+      <button id="refreshBtn">Refresh Scenario</button>
+    </div>
+  </section>
+
+<script>
+const tickers = ["AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AMD"];
+const deals = [
+  {client:"Nova Asset Mgmt", mandate:"AI infra hedge", stage:"Termsheet shared", notional:45, confidence:"High"},
+  {client:"Crown Family Office", mandate:"Semi pairs trade", stage:"Pricing review", notional:18, confidence:"Medium"},
+  {client:"Horizon Pension", mandate:"Mega-cap execution", stage:"Trade window T+2", notional:120, confidence:"High"}
+];
+
+function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function simulate(seed=42, points=180){
+  const rand = mulberry32(seed);
+  const dates=[], series={};
+  tickers.forEach(t=>series[t]=[]);
+  const now = new Date();
+  for(let i=points-1;i>=0;i--){
+    const d=new Date(now); d.setDate(now.getDate()-i); dates.push(d.toISOString().slice(0,10));
+  }
+  tickers.forEach((t,idx)=>{
+    let px=90+rand()*340;
+    for(let i=0;i<points;i++){
+      const noise=(rand()-0.5)*0.045;
+      const drift=0.0008+idx*0.00006;
+      px=Math.max(20, px*(1+drift+noise));
+      series[t].push(Number(px.toFixed(2)));
+    }
+  });
+  return {dates, series};
+}
+
+function renderDashboard(){
+  const {dates, series} = simulate(Math.floor(Math.random()*10000));
+  const normTraces=tickers.map(t=>({x:dates, y:series[t].map(v=>v/series[t][0]*100), mode:'lines', name:t}));
+  Plotly.newPlot('performanceChart', normTraces, {template:'plotly_dark', height:420, margin:{t:20}});
+
+  const select=document.getElementById('tickerSelect');
+  select.innerHTML=tickers.map(t=>`<option>${t}</option>`).join('');
+  const draw = ()=>{
+    const t=select.value || 'NVDA';
+    const arr=series[t]; let max=-Infinity;
+    const dd=arr.map(v=>{ max=Math.max(max,v); return (v-max)/max*100; });
+    Plotly.newPlot('drawdownChart', [{x:dates,y:dd,fill:'tozeroy',name:`${t} Drawdown`}], {template:'plotly_dark', height:320, margin:{t:20}});
+  };
+  select.onchange=draw; select.value='NVDA'; draw();
+
+  const positions=tickers.slice(0,5).map((t,i)=>{
+    const current=series[t].at(-1), side=i===4?'Short':'Long', qty=500+(i+1)*220;
+    const entry=Number((current*(side==='Long'?0.93:1.06)).toFixed(2));
+    const pnl=(side==='Long'?(current-entry):(entry-current))*qty;
+    return {t,side,qty,entry,current,pnl};
+  });
+  const totalPnl=positions.reduce((a,b)=>a+b.pnl,0), gross=positions.reduce((a,b)=>a+b.current*b.qty,0);
+  const weekly=tickers.map(t=>({t,ret:(series[t].at(-1)/series[t].at(-6)-1)})).sort((a,b)=>b.ret-a.ret);
+
+  document.getElementById('kpis').innerHTML=`
+    <div class='card kpi'><h3>Total Desk PnL</h3><p>$${totalPnl.toFixed(0)}</p></div>
+    <div class='card kpi'><h3>Gross Exposure</h3><p>$${gross.toFixed(0)}</p></div>
+    <div class='card kpi'><h3>Win Ratio</h3><p>${(positions.filter(p=>p.pnl>0).length/positions.length*100).toFixed(0)}%</p></div>
+    <div class='card kpi'><h3>Deals Notional</h3><p>$${deals.reduce((a,d)=>a+d.notional,0)}M</p></div>`;
+
+  document.getElementById('movers').innerHTML=weekly.map(m=>`<tr><td>${m.t}</td><td class='${m.ret>=0?'pos':'neg'}'>${(m.ret*100).toFixed(2)}%</td></tr>`).join('');
+  document.getElementById('positions').innerHTML=positions.map(p=>`<tr><td>${p.t}</td><td>${p.side}</td><td>${p.qty}</td><td>$${p.entry}</td><td>$${p.current.toFixed(2)}</td><td class='${p.pnl>=0?'pos':'neg'}'>$${p.pnl.toFixed(0)}</td></tr>`).join('');
+  document.getElementById('pipeline').innerHTML=deals.map(d=>`<li><strong>${d.client}</strong> · $${d.notional}M<br><span class='muted'>${d.mandate}</span><br>Stage: ${d.stage} · Confidence: ${d.confidence}</li>`).join('');
+}
+
+document.getElementById('refreshBtn').onclick=renderDashboard;
+renderDashboard();
+</script>
+</body>
+</html>
